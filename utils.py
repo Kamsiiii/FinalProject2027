@@ -45,79 +45,76 @@ DISTAL       = 3
 
 def extract_features(hand) -> np.ndarray:
     """
-    Convert a Leap Motion Hand object into a normalised 71-d feature vector.
-
-    Parameters
-    ----------
-    hand : leap.Hand
-        A valid Hand object from a Leap Motion frame.
-
-    Returns
-    -------
-    np.ndarray, shape (71,), dtype float32
-        Normalised feature vector ready for classifier input.
-
-    Raises
-    ------
-    ValueError
-        If the hand object does not contain the expected number of fingers.
+    Convert a hand dict (from WebSocket bridge) into a normalised 71-d feature vector.
     """
-    if len(hand.fingers) != NUM_FINGERS:
+    fingers = hand["fingers"]
+
+    if len(fingers) != NUM_FINGERS:
         raise ValueError(
-            f"Expected {NUM_FINGERS} fingers, got {len(hand.fingers)}. "
-            "Frame may be partially occluded."
+            "Expected " + str(NUM_FINGERS) + " fingers, got " + str(len(fingers))
         )
 
-    # Build the hand-local coordinate frame from palm vectors
-    local_frame = _build_local_frame(hand)
+    palm_dir    = np.array(hand["direction"],   dtype=np.float32)
+    palm_normal = np.array(hand["palm_normal"], dtype=np.float32)
+    local_frame = _build_local_frame_from_vecs(palm_dir, palm_normal)
 
     features = []
 
-    # ── 1. Finger extension flags (5 dims) ───────────────────────────────────
-    for finger in hand.fingers:
-        features.append(float(finger.is_extended))
+    # 1. Finger extension flags (5 dims)
+    for f in fingers:
+        features.append(float(f["is_extended"]))
 
-    # ── 2–4. Bone direction angles in hand-local frame (60 dims) ─────────────
+    # 2-4. Bone direction angles in hand-local frame (60 dims)
     pitch_vals, yaw_vals, roll_vals = [], [], []
-
-    for finger in hand.fingers:
-        for bone in finger.bones:
-            direction = np.array(bone.direction)
-            local_dir = _to_local(direction, local_frame)
+    for f in fingers:
+        for bone in f["bones"]:
+            direction = np.array(bone["direction"], dtype=np.float32)
+            local_dir = local_frame @ direction
             p, y, r   = _direction_to_pyr(local_dir)
             pitch_vals.append(p)
             yaw_vals.append(y)
             roll_vals.append(r)
 
-    features.extend(pitch_vals)   # 20 dims
-    features.extend(yaw_vals)     # 20 dims
-    features.extend(roll_vals)    # 20 dims
+    features.extend(pitch_vals)
+    features.extend(yaw_vals)
+    features.extend(roll_vals)
 
-    # ── 5. Palm orientation (2 dims) ─────────────────────────────────────────
-    palm_normal = np.array(hand.palm_normal)
-    local_normal = _to_local(palm_normal, local_frame)
+    # 5. Palm orientation (2 dims)
+    local_normal  = local_frame @ palm_normal
     palm_p, palm_y, _ = _direction_to_pyr(local_normal)
     features.append(palm_p)
     features.append(palm_y)
 
-    # ── 6. Inter-fingertip distances to thumb (4 dims) ───────────────────────
-    hand_span   = _compute_hand_span(hand)
-    thumb_tip   = np.array(hand.fingers[THUMB].tip_position)
-
+    # 6. Inter-fingertip distances to thumb (4 dims)
+    thumb_tip  = np.array(fingers[THUMB]["tip_position"], dtype=np.float32)
+    hand_span  = _compute_hand_span_from_dict(hand)
     for i in range(INDEX, NUM_FINGERS):
-        finger_tip = np.array(hand.fingers[i].tip_position)
-        dist = np.linalg.norm(finger_tip - thumb_tip)
-        # Normalise by hand span to remove scale dependency
+        tip  = np.array(fingers[i]["tip_position"], dtype=np.float32)
+        dist = np.linalg.norm(tip - thumb_tip)
         features.append(dist / (hand_span + 1e-6))
 
     vec = np.array(features, dtype=np.float32)
 
     if vec.shape[0] != BASE_FEATURES:
         raise RuntimeError(
-            f"Feature vector has {vec.shape[0]} dims, expected {BASE_FEATURES}."
+            "Feature vector has " + str(vec.shape[0]) + " dims, expected " + str(BASE_FEATURES)
         )
 
     return vec
+
+
+def _build_local_frame_from_vecs(direction, palm_normal):
+    x = _safe_normalise(np.array(direction,   dtype=np.float32))
+    y = _safe_normalise(np.array(palm_normal, dtype=np.float32))
+    z = _safe_normalise(np.cross(x, y))
+    y = _safe_normalise(np.cross(z, x))
+    return np.stack([x, y, z], axis=0)
+
+
+def _compute_hand_span_from_dict(hand) -> float:
+    index_base  = np.array(hand["fingers"][INDEX]["bones"][METACARPAL]["direction"], dtype=np.float32)
+    little_base = np.array(hand["fingers"][LITTLE]["bones"][METACARPAL]["direction"], dtype=np.float32)
+    return max(float(np.linalg.norm(index_base - little_base)), 1.0)
 
 
 # ── Velocity and acceleration augmentation (for LSTM / dynamic signs) ────────
