@@ -7,6 +7,7 @@ from utils import extract_features   # we'll build this next
 
 # ── Config ────────────────────────────────────────────────────────────────────
 LETTERS         = list("ABCDEFGHIJKLMNOPQRSTUVWXYZ")
+DYNAMIC_LETTERS     = {"J", "Z"}
 SAMPLES_PER_LETTER  = 150
 EXTRA_LETTERS   = {"A", "E", "S", "M", "N", "D", "G"}  # high-confusion groups
 EXTRA_SAMPLES   = 50     # additional samples for those letters
@@ -24,23 +25,29 @@ def countdown(label, seconds=COUNTDOWN_SECS):
 def collect_letter(sensor, label, n_samples):
     """Collect n_samples frames for the given letter label."""
     countdown(label)
-    samples = []
+    samples  = []
     attempts = 0
-    max_attempts = n_samples * 5  # allow some missed frames
+    max_attempts = n_samples * 20  # increased from 5 to 20
+
+    print("  Hold your hand steady over the sensor...")
 
     while len(samples) < n_samples and attempts < max_attempts:
         hand = sensor.get_hand()
-        if hand:
+        if hand is not None:
             try:
                 features = extract_features(hand)
                 samples.append([label] + features.tolist())
+                if len(samples) % 30 == 0:
+                    print("  Collected " + str(len(samples)) + "/" + str(n_samples))
             except Exception as e:
-                pass  # skip malformed frames silently
+                print("  Frame error: " + str(e))
+        else:
+            time.sleep(0.05)  # wait a bit if no hand data yet
         attempts += 1
-        time.sleep(1 / 60)  # ~60 fps polling rate
+        time.sleep(1 / 60)
 
     if len(samples) < n_samples:
-        print(f"  Warning: only got {len(samples)}/{n_samples} samples for '{label}'")
+        print("  Warning: only got " + str(len(samples)) + "/" + str(n_samples) + " samples for '" + label + "'")
 
     return samples
 
@@ -63,6 +70,9 @@ def main():
         print(f"Resuming — already collected: {sorted(collected)}")
 
     for letter in LETTERS:
+        if letter in DYNAMIC_LETTERS:
+            print(f"Skipping '{letter}' (dynamic - will collect separately)")
+            continue
         if letter in collected:
             print(f"Skipping '{letter}' (already done)")
             continue
