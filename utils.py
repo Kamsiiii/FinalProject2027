@@ -25,7 +25,7 @@ import numpy as np
 
 NUM_FINGERS     = 5
 NUM_BONES       = 4
-BASE_FEATURES   = 71   # dimension of a single-frame feature vector
+BASE_FEATURES   = 61   # dimension of a single-frame feature vector
 
 # Finger indices (Leap Motion convention)
 THUMB   = 0
@@ -45,7 +45,8 @@ DISTAL       = 3
 
 def extract_features(hand) -> np.ndarray:
     """
-    Convert a hand dict (from WebSocket bridge) into a normalised 71-d feature vector.
+    Convert a hand dict into a feature vector using tip positions
+    and joint positions (v4 WebSocket compatible).
     """
     fingers = hand["fingers"]
 
@@ -54,9 +55,15 @@ def extract_features(hand) -> np.ndarray:
             "Expected " + str(NUM_FINGERS) + " fingers, got " + str(len(fingers))
         )
 
-    palm_dir    = np.array(hand["direction"],   dtype=np.float32)
-    palm_normal = np.array(hand["palm_normal"], dtype=np.float32)
-    local_frame = _build_local_frame_from_vecs(palm_dir, palm_normal)
+    palm_pos    = np.array(hand["palm_position"], dtype=np.float32)
+    palm_normal = np.array(hand["palm_normal"],   dtype=np.float32)
+    direction   = np.array(hand["direction"],     dtype=np.float32)
+
+    # Build local frame for normalisation
+    local_frame = _build_local_frame_from_vecs(direction, palm_normal)
+
+    # Hand span for scale normalisation
+    hand_span = _compute_hand_span_from_dict(hand)
 
     features = []
 
@@ -64,42 +71,52 @@ def extract_features(hand) -> np.ndarray:
     for f in fingers:
         features.append(float(f["is_extended"]))
 
-    # 2-4. Bone direction angles in hand-local frame (60 dims)
-    pitch_vals, yaw_vals, roll_vals = [], [], []
+    # 2. Normalised tip positions relative to palm (15 dims: 3 per finger)
     for f in fingers:
-        for bone in f["bones"]:
-            direction = np.array(bone["direction"], dtype=np.float32)
-            local_dir = local_frame @ direction
-            p, y, r   = _direction_to_pyr(local_dir)
-            pitch_vals.append(p)
-            yaw_vals.append(y)
-            roll_vals.append(r)
+        tip = np.array(f["tip_position"], dtype=np.float32)
+        rel = (tip - palm_pos) / (hand_span + 1e-6)
+        local_rel = local_frame @ rel
+        features.extend(local_rel.tolist())
 
-    features.extend(pitch_vals)
-    features.extend(yaw_vals)
-    features.extend(roll_vals)
+    # 3. Normalised MCP joint positions relative to palm (15 dims)
+    for f in fingers:
+        mcp = np.array(f.get("mcp_position", f["tip_position"]), dtype=np.float32)
+        rel = (mcp - palm_pos) / (hand_span + 1e-6)
+        local_rel = local_frame @ rel
+        features.extend(local_rel.tolist())
+
+    # 4. Normalised PIP joint positions relative to palm (15 dims)
+    for f in fingers:
+        pip = np.array(f.get("pip_position", f["tip_position"]), dtype=np.float32)
+        rel = (pip - palm_pos) / (hand_span + 1e-6)
+        local_rel = local_frame @ rel
+        features.extend(local_rel.tolist())
 
     # 5. Palm orientation (2 dims)
-    local_normal  = local_frame @ palm_normal
+    local_normal = local_frame @ palm_normal
     palm_p, palm_y, _ = _direction_to_pyr(local_normal)
     features.append(palm_p)
     features.append(palm_y)
 
     # 6. Inter-fingertip distances to thumb (4 dims)
-    thumb_tip  = np.array(fingers[THUMB]["tip_position"], dtype=np.float32)
-    hand_span  = _compute_hand_span_from_dict(hand)
+    thumb_tip = np.array(fingers[THUMB]["tip_position"], dtype=np.float32)
     for i in range(INDEX, NUM_FINGERS):
         tip  = np.array(fingers[i]["tip_position"], dtype=np.float32)
         dist = np.linalg.norm(tip - thumb_tip)
         features.append(dist / (hand_span + 1e-6))
 
+    # 7. Finger curl angles from tip-to-mcp vectors (5 dims)
+    for f in fingers:
+        tip = np.array(f["tip_position"],                              dtype=np.float32)
+        mcp = np.array(f.get("mcp_position", f["tip_position"]),       dtype=np.float32)
+        vec = tip - mcp
+        norm = np.linalg.norm(vec)
+        if norm > 1e-6:
+            vec = vec / norm
+        curl = float(np.dot(vec, np.array([0, 1, 0], dtype=np.float32)))
+        features.append(curl)
+
     vec = np.array(features, dtype=np.float32)
-
-    if vec.shape[0] != BASE_FEATURES:
-        raise RuntimeError(
-            "Feature vector has " + str(vec.shape[0]) + " dims, expected " + str(BASE_FEATURES)
-        )
-
     return vec
 
 
@@ -161,21 +178,20 @@ def extract_sequence_features(frame_sequence: list) -> np.ndarray:
 
 def is_valid_frame(hand) -> bool:
     """
-    Quick sanity check on a hand frame before feature extraction.
-
-    Returns False if the frame is likely a tracking failure (e.g. a finger
-    has a zero-length direction vector, or the hand confidence is very low).
+    Quick sanity check on a hand dict before feature extraction.
     """
     if hand is None:
         return False
 
-    # Leap Motion provides a confidence score 0–1
-    if hasattr(hand, 'confidence') and hand.confidence < 0.1:
+    if "fingers" not in hand:
         return False
 
-    for finger in hand.fingers:
-        for bone in finger.bones:
-            direction = np.array(bone.direction)
+    if len(hand["fingers"]) != NUM_FINGERS:
+        return False
+
+    for finger in hand["fingers"]:
+        for bone in finger["bones"]:
+            direction = np.array(bone["direction"])
             if np.linalg.norm(direction) < 1e-4:
                 return False
 

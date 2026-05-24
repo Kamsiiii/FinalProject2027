@@ -83,6 +83,9 @@ class SensorConnection:
             fingers.append({
                 "is_extended"  : p.get("extended", False),
                 "tip_position" : p.get("tipPosition", [0, 0, 0]),
+                "mcp_position" : p.get("mcpPosition", [0, 0, 0]),
+                "pip_position" : p.get("pipPosition", [0, 0, 0]),  
+                "dip_position" : p.get("dipPosition", [0, 0, 0]),  
                 "bones"        : bones,
             })
 
@@ -90,6 +93,8 @@ class SensorConnection:
             "direction"    : hand.get("direction", [0, 0, 1]),
             "palm_normal"  : hand.get("palmNormal", [0, -1, 0]),
             "palm_position": hand.get("palmPosition", [0, 0, 0]),
+            "palm_velocity": hand.get("palmVelocity", [0, 0, 0]),
+            "wrist_position": hand.get("wristPosition", [0, 0, 0]),
             "fingers"      : fingers,
         }
 
