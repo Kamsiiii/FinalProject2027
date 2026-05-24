@@ -119,32 +119,40 @@ def _print_class_distribution(y):
 
 def preprocess(X: np.ndarray, y: np.ndarray):
     """
-    Apply outlier filtering and encode string labels to integers.
+    Prepares the raw dataset for training.
+
+    Parameters
+    ----------
+    X : np.ndarray, shape (N, 71)
+        The feature matrix — N samples, each with 71 feature values.
+    y : np.ndarray, shape (N,)
+        The label array — N strings like "A", "B", "C" etc.
 
     Returns
     -------
-    X_clean : np.ndarray
-    y_encoded : np.ndarray  (integer class indices)
-    le : LabelEncoder       (fitted, needed to decode predictions)
+    X : np.ndarray
+        The feature matrix (unchanged, outlier filter disabled).
+    y_encoded : np.ndarray
+        Labels converted from strings to integers.
+        e.g. "A" -> 0, "B" -> 1, "C" -> 2 etc.
+        The model needs numbers, not strings.
+    le : LabelEncoder
+        The fitted encoder — saved alongside the model so we can
+        convert integer predictions BACK to letters at inference time.
+        e.g. prediction of 0 -> "A", 1 -> "B" etc.
     """
-    print("Filtering outliers...")
-    X_clean = filter_outliers(X, threshold=3.5)
-    y_clean = y[: len(X_clean)]   # filter_outliers preserves row order
 
-    # Re-filter y using the same boolean mask (filter_outliers doesn't return it,
-    # so we recompute the mask here for correctness)
-    q1  = np.percentile(X, 25, axis=0)
-    q3  = np.percentile(X, 75, axis=0)
-    iqr = np.where((q3 - q1) < 1e-6, 1e-6, q3 - q1)
-    mask = np.all((X >= q1 - 3.5 * iqr) & (X <= q3 + 3.5 * iqr), axis=1)
-    y_clean = y[mask]
-    X_clean = X[mask]
-
+    # LabelEncoder converts string labels to integers
+    # fit_transform() learns the mapping AND applies it in one step
     le = LabelEncoder()
-    y_encoded = le.fit_transform(y_clean)
+    y_encoded = le.fit_transform(y)
 
+    # le.classes_ shows the mapping e.g. ['A', 'B', 'C' ...]
+    # index 0 = A, index 1 = B etc.
     print(f"Classes after encoding: {list(le.classes_)}\n")
-    return X_clean, y_encoded, le
+
+    # Return X unchanged, the encoded labels, and the encoder itself
+    return X, y_encoded, le
 
 
 # ── Training ──────────────────────────────────────────────────────────────────
