@@ -314,30 +314,39 @@ BONE_NAMES   = ["Metacarpal", "Proximal", "Intermediate", "Distal"]
 
 def feature_names() -> list:
     """
-    Return a list of human-readable names for all 71 feature dimensions.
-    Useful for feature importance plots.
+    Return human-readable names for all 61 feature dimensions.
     """
     names = []
 
-    # Extension flags
+    # Extension flags (5)
     for f in FINGER_NAMES:
         names.append(f"{f}_extended")
 
-    # Bone angles
-    for angle in ["pitch", "yaw", "roll"]:
-        for f in FINGER_NAMES:
-            for b in BONE_NAMES:
-                names.append(f"{f}_{b}_{angle}")
+    # Tip positions (15)
+    for f in FINGER_NAMES:
+        for axis in ["x", "y", "z"]:
+            names.append(f"{f}_tip_{axis}")
 
-    # Palm orientation
+    # MCP positions (15)
+    for f in FINGER_NAMES:
+        for axis in ["x", "y", "z"]:
+            names.append(f"{f}_mcp_{axis}")
+
+    # PIP positions (15)
+    for f in FINGER_NAMES:
+        for axis in ["x", "y", "z"]:
+            names.append(f"{f}_pip_{axis}")
+
+    # Palm orientation (2)
     names.append("palm_pitch")
     names.append("palm_yaw")
 
-    # Inter-fingertip distances
+    # Inter-fingertip distances (4)
     for f in FINGER_NAMES[1:]:
         names.append(f"{f}_to_thumb_dist")
 
-    assert len(names) == BASE_FEATURES, \
-        f"Name count mismatch: {len(names)} != {BASE_FEATURES}"
+    # Curl angles (5)
+    for f in FINGER_NAMES:
+        names.append(f"{f}_curl")
 
     return names

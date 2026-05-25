@@ -50,9 +50,9 @@ MODEL_DIR       = "models"
 EVAL_DIR        = "evaluation"
 
 WINDOW_SIZE     = 30                   # frames per sequence
-AUGMENTED_DIMS  = 213                  # 71 base + 71 velocity + 71 acceleration
+AUGMENTED_DIMS  = 183                  # 61 base + 61 velocity + 61 acceleration
 
-NEITHER_SEQUENCES = 400                # how many 'Neither' sequences to generate
+NEITHER_SEQUENCES = 2000                # how many 'Neither' sequences to generate
                                        # (sampled from static letter data)
 
 TEST_SIZE       = 0.20
@@ -70,12 +70,12 @@ def load_dynamic_sequences(dynamic_dir: str):
     """
     Load all .npy sequence files for J and Z.
 
-    Each file is expected to be shape (WINDOW_SIZE, 71) — the raw base
+    Each file is expected to be shape (WINDOW_SIZE, 61) — the raw base
     feature vectors before velocity/acceleration augmentation.
 
     Returns
     -------
-    sequences : list of np.ndarray, each shape (30, 71)
+    sequences : list of np.ndarray, each shape (30, 61)
     labels    : list of str  ("J" or "Z")
     """
     sequences, labels = [], []
@@ -93,7 +93,7 @@ def load_dynamic_sequences(dynamic_dir: str):
 
         for fname in files:
             seq = np.load(os.path.join(letter_dir, fname))
-            if seq.shape != (WINDOW_SIZE, 71):
+            if seq.shape != (WINDOW_SIZE, 61):
                 print(f"  Skipping {fname}: unexpected shape {seq.shape}")
                 continue
             sequences.append(seq)
@@ -116,7 +116,7 @@ def generate_neither_sequences(static_csv: str, n_sequences: int):
 
     Returns
     -------
-    sequences : list of np.ndarray, each shape (30, 71)
+    sequences : list of np.ndarray, each shape (30, 61)
     """
     import csv
     from utils import BASE_FEATURES
@@ -185,10 +185,10 @@ def build_dataset(dynamic_dir: str, static_csv: str):
     print("Augmenting sequences with velocity and acceleration...")
     X_augmented = []
     for seq in sequences:
-        augmented = extract_sequence_features(seq)   # (30, 213)
+        augmented = extract_sequence_features(seq)   # (30, 183)
         X_augmented.append(augmented)
 
-    X = np.array(X_augmented, dtype=np.float32)   # (N, 30, 213)
+    X = np.array(X_augmented, dtype=np.float32)   # (N, 30, 183)
 
     # Encode labels
     le = LabelEncoder()
@@ -236,7 +236,7 @@ def build_model(input_shape, n_classes: int) -> keras.Model:
 
     Architecture
     ────────────
-    Input   → (batch, 30, 213)
+    Input   → (batch, 30, 183)
     LSTM-1  → 128 units, return_sequences=True
     Dropout → 0.3
     LSTM-2  → 64 units
@@ -246,7 +246,7 @@ def build_model(input_shape, n_classes: int) -> keras.Model:
 
     Parameters
     ----------
-    input_shape : tuple  e.g. (30, 213)
+    input_shape : tuple  e.g. (30, 183)
     n_classes   : int    number of output classes (3)
     """
     model = keras.Sequential([

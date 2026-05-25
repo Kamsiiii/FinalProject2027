@@ -46,7 +46,7 @@ LSTM_SCALER_PATH = f"{MODEL_DIR}/lstm_scaler.pkl"
 
 WINDOW_SIZE          = 30
 RF_CONFIDENCE        = 0.85
-LSTM_CONFIDENCE      = 0.97
+LSTM_CONFIDENCE      = 0.98
 DEBOUNCE_FRAMES      = 3
 LOCKOUT_FRAMES       = 150
 GUI_QUEUE_MAXSIZE    = 5
@@ -231,12 +231,12 @@ class InferenceEngine:
         if self._lockout_counter > 0:
             self._lockout_counter -= 1
 
-        # Step 2: LSTM temporarily disabled
-        # if len(self._window) == WINDOW_SIZE:
-        #     letter, conf = self._classify_dynamic()
-        #     if letter is not None and conf >= lstm_threshold:
-        #         self._lockout_counter = LOCKOUT_FRAMES
-        #         return letter, conf, True
+        # Step 2: LSTM
+        if len(self._window) == WINDOW_SIZE:
+            letter, conf = self._classify_dynamic()
+            if letter is not None and conf >= lstm_threshold:
+                self._lockout_counter = LOCKOUT_FRAMES
+                return letter, conf, True
 
         # Step 3: Static Random Forest only
         letter, conf = self._classify_static(features)
