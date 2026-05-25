@@ -1,6 +1,6 @@
 """
 inference.py
-------------
+
 Real-time inference engine for ASL fingerspelling recognition.
 
 Combines two models:
@@ -12,7 +12,7 @@ sensor at ~115fps, maintaining a sliding window for the LSTM, and placing
 confirmed predictions into a thread-safe queue consumed by the GUI.
 
 Public API
-----------
+
     engine = InferenceEngine()
     engine.start()
     engine.stop()
@@ -45,12 +45,12 @@ LSTM_MODEL_PATH  = f"{MODEL_DIR}/lstm_jz.keras"
 LSTM_SCALER_PATH = f"{MODEL_DIR}/lstm_scaler.pkl"
 
 WINDOW_SIZE          = 30
-RF_CONFIDENCE        = 0.85
+RF_CONFIDENCE        = 0.40
 LSTM_CONFIDENCE      = 0.98
 DEBOUNCE_FRAMES      = 3
 LOCKOUT_FRAMES       = 150
 GUI_QUEUE_MAXSIZE    = 5
-POLL_SLEEP_SECS      = 1 / 115
+POLL_SLEEP_SECS      = 1 / 200  # Polling at 200fps gives more responsive predictions and smoother confidence updates
 
 
 # ── Result dataclass ──────────────────────────────────────────────────────────
@@ -215,14 +215,6 @@ class InferenceEngine:
     # ── Classification ────────────────────────────────────────────────────────
 
     def _classify(self, features: np.ndarray):
-        """
-        Run both classifiers and return the best prediction.
-
-        Priority order:
-          1. Check lockout first
-          2. LSTM (dynamic) if window full and not in lockout
-          3. Random Forest (static) fallback
-        """
         with self._lock:
             rf_threshold   = self._rf_threshold
             lstm_threshold = self._lstm_threshold
@@ -230,20 +222,44 @@ class InferenceEngine:
         # Step 1: Decrement lockout counter if active
         if self._lockout_counter > 0:
             self._lockout_counter -= 1
+            # Skip LSTM during lockout — static only
+            letter, conf = self._classify_static(features)
+            if letter is not None and conf >= rf_threshold:
+                return letter, conf, False
+            return None, 0.0, False
 
-        # Step 2: LSTM
-        if len(self._window) == WINDOW_SIZE:
-            letter, conf = self._classify_dynamic()
-            if letter is not None and conf >= lstm_threshold:
-                self._lockout_counter = LOCKOUT_FRAMES
-                return letter, conf, True
+        # Step 2: Try LSTM only if window full AND hand is moving
+        # if len(self._window) == WINDOW_SIZE and self._hand_is_moving():
+        #     letter, conf = self._classify_dynamic()
+        #     if letter is not None and conf >= lstm_threshold:
+        #         self._lockout_counter = LOCKOUT_FRAMES
+        #         return letter, conf, True
 
-        # Step 3: Static Random Forest only
+        # Step 3: Static Random Forest fallback
         letter, conf = self._classify_static(features)
         if letter is not None and conf >= rf_threshold:
             return letter, conf, False
 
         return None, 0.0, False
+    
+    def _hand_is_moving(self) -> bool:
+        """
+        Returns True only if the hand has been moving consistently
+        for at least 6 frames — filters out brief twitches.
+        """
+        if len(self._window) < 10:
+            return False
+
+        recent  = list(self._window)[-10:]
+        vectors = np.array(recent)
+        diffs   = np.diff(vectors, axis=0)
+
+        # Check each frame-to-frame motion
+        frame_motions = np.mean(np.abs(diffs), axis=1)
+
+        # Require at least 6 out of 9 frames to show significant motion
+        moving_frames = int(np.sum(frame_motions > 0.02))
+        return moving_frames >= 6
 
     def _classify_static(self, features: np.ndarray):
         """Run the Random Forest on a single feature vector."""
